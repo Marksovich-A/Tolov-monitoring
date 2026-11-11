@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// Ko'rinish qoidasi:
+//  - Hamma tizimga kirgan foydalanuvchi barcha 12 filialning KUNLIK YIG'INDISINI ko'radi (branchDays).
+//  - Yig'uvchilar profili va hisobotlari faqat o'sha yig'uvchining O'Z FILIALIDA ko'rinadi.
+//  - Yozish: faqat o'z profili, o'z hisoboti va o'z filialining yig'indisi.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myBranch() {
+      return get(/databases/$(database)/documents/collectors/$(request.auth.uid)).data.branchId;
+    }
+
+    // config.js dagi BRANCHES bilan bir xil bo'lsin
+    function validBranch(id) {
+      return id in ['bogot', 'gurlan', 'xonqa', 'hazorasp', 'xiva', 'qoshkopir',
+                    'shovot', 'urganch', 'yangiariq', 'yangibozor', 'tuproqqala', 'amudaryo'];
+    }
+
+    match /collectors/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || resource.data.branchId == myBranch());
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && validBranch(request.resource.data.branchId)
+        && request.resource.data.total in [300, 500];
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.branchId == resource.data.branchId;
+      allow delete: if false;
+    }
+
+    // Hisobot ID si: "<uid>_<YYYY-MM-DD>"
+    match /reports/{reportId} {
+      allow read: if signedIn() && resource.data.branchId == myBranch();
+      allow create, update: if signedIn()
+        && request.resource.data.collectorId == request.auth.uid
+        && request.resource.data.branchId == myBranch()
+        && reportId == request.auth.uid + '_' + request.resource.data.date;
+      allow delete: if false;
+    }
+
+    // Filial yig'indisi ID si: "<branchId>_<YYYY-MM-DD>"
+    // Eslatma: yig'indi mijoz tomonida tranzaksiya bilan yangilanadi. Qoida qiymat to'g'riligini
+    // tekshirmaydi, faqat kim yozishini cheklaydi. Jiddiy ishlatishda Cloud Functions kerak.
+    match /branchDays/{dayId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.branchId == myBranch()
+        && dayId == request.resource.data.branchId + '_' + request.resource.data.date;
+      allow delete: if false;
+    }
+  }
+}
